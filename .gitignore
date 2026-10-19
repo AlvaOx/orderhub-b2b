@@ -1,0 +1,24 @@
+# Dependencias
+node_modules/
+
+# Builds
+dist/
+.next/
+out/
+*.tsbuildinfo
+
+# Variables de entorno (NUNCA se suben)
+.env
+.env.*
+!.env.example
+
+# Tests
+coverage/
+playwright-report/
+test-results/
+
+# Varios
+*.log
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
