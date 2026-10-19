@@ -22,3 +22,6 @@ test-results/
 .DS_Store
 .vscode/*
 !.vscode/extensions.json
+
+# Cliente de Prisma (se genera con prisma generate)
+backend/src/generated/
