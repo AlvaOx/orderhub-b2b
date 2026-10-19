@@ -4,3 +4,4 @@ dist
 coverage
 pnpm-lock.yaml
 backend/prisma/migrations
+frontend/next-env.d.ts

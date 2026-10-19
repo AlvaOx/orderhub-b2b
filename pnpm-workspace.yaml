@@ -2,3 +2,7 @@ packages:
   - frontend
   - backend
   - shared
+
+allowBuilds:
+  sharp: false
+  unrs-resolver: false
