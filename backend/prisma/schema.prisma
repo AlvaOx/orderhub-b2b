@@ -1,5 +1,6 @@
 // =============================================
 // OrderHub B2B — Esquema de base de datos
+// Montos en pesos chilenos enteros (CLP no usa decimales).
 // =============================================
 
 generator client {
@@ -13,13 +14,40 @@ datasource db {
   provider = "postgresql"
 }
 
-// ---------- Roles ----------
+// ---------- Enums ----------
 enum Role {
   admin
   vendedor
   bodega
 
   @@map("user_role")
+}
+
+enum OrderStatus {
+  pendiente_pago
+  pagado
+  preparando
+  despachado
+  entregado
+  cancelado
+
+  @@map("order_status")
+}
+
+enum PaymentProvider {
+  mercadopago
+
+  @@map("payment_provider")
+}
+
+enum PaymentStatus {
+  pendiente
+  aprobado
+  rechazado
+  cancelado
+  reembolsado
+
+  @@map("payment_status")
 }
 
 // ---------- Empresas (tenants) ----------
@@ -29,7 +57,11 @@ model Tenant {
   slug      String   @unique
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  users User[]
+  users      User[]
+  products   Product[]
+  orders     Order[]
+  orderItems OrderItem[]
+  payments   Payment[]
 
   @@map("tenants")
 }
@@ -44,8 +76,99 @@ model User {
   role         Role
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  orders Order[]
 
   @@index([tenantId])
   @@map("users")
+}
+
+// ---------- Productos ----------
+model Product {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  sku       String
+  name      String
+  price     Int
+  stock     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  orderItems OrderItem[]
+
+  @@unique([tenantId, sku])
+  @@map("products")
+}
+
+// ---------- Pedidos ----------
+model Order {
+  id        String      @id @default(uuid(7)) @db.Uuid
+  tenantId  String      @map("tenant_id") @db.Uuid
+  sellerId  String      @map("seller_id") @db.Uuid
+  status    OrderStatus @default(pendiente_pago)
+  total     Int
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  seller   User        @relation(fields: [sellerId], references: [id], onDelete: Restrict)
+  items    OrderItem[]
+  payments Payment[]
+
+  // Paginación por cursor: "los pedidos de esta empresa, del más nuevo al más antiguo".
+  @@index([tenantId, createdAt(sort: Desc), id])
+  // Filtro por estado dentro de una empresa.
+  @@index([tenantId, status])
+  @@map("orders")
+}
+
+// ---------- Ítems de pedido ----------
+model OrderItem {
+  id        String @id @default(uuid(7)) @db.Uuid
+  tenantId  String @map("tenant_id") @db.Uuid
+  orderId   String @map("order_id") @db.Uuid
+  productId String @map("product_id") @db.Uuid
+  quantity  Int
+  unitPrice Int    @map("unit_price")
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+// ---------- Pagos ----------
+model Payment {
+  id         String          @id @default(uuid(7)) @db.Uuid
+  tenantId   String          @map("tenant_id") @db.Uuid
+  orderId    String          @map("order_id") @db.Uuid
+  provider   PaymentProvider
+  externalId String?         @map("external_id")
+  status     PaymentStatus   @default(pendiente)
+  amount     Int
+  createdAt  DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, externalId])
+  @@index([orderId])
+  @@map("payments")
+}
+
+// ---------- Eventos de webhook (idempotencia) ----------
+model WebhookEvent {
+  id          String          @id @default(uuid(7)) @db.Uuid
+  provider    PaymentProvider
+  eventId     String          @map("event_id")
+  payload     Json
+  receivedAt  DateTime        @default(now()) @map("received_at") @db.Timestamptz(3)
+  processedAt DateTime?       @map("processed_at") @db.Timestamptz(3)
+
+  @@unique([provider, eventId])
+  @@map("webhook_events")
 }
