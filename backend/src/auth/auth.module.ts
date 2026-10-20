@@ -7,6 +7,7 @@ import type { Env } from '../config/env.schema.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
+import { PermissionsGuard } from './permissions.guard.js';
 
 @Module({
   imports: [
@@ -24,8 +25,11 @@ import { JwtAuthGuard } from './jwt-auth.guard.js';
   controllers: [AuthController],
   providers: [
     AuthService,
-    // Guard global: todas las rutas exigen sesión, salvo las marcadas con @Public().
+    // Guards globales. El ORDEN importa: Nest los ejecuta en el orden en que se registran.
+    // 1) ¿Quién eres? Todas las rutas exigen sesión, salvo @Public().
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // 2) ¿Qué puedes hacer? Permisos por rol; una ruta sin declarar se bloquea.
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
 export class AuthModule {}

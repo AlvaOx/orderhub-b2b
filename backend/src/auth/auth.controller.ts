@@ -18,6 +18,7 @@ import type { Env } from '../config/env.schema.js';
 import { ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE } from './auth.constants.js';
 import { AuthService } from './auth.service.js';
 import type { AccessTokenPayload, SessionTokens } from './auth.types.js';
+import { Authenticated } from './authenticated.decorator.js';
 import { CurrentUser } from './current-user.decorator.js';
 import { Public } from './public.decorator.js';
 
@@ -68,7 +69,9 @@ export class AuthController {
     res.clearCookie(REFRESH_TOKEN_COOKIE, this.cookieOptions(REFRESH_COOKIE_PATH));
   }
 
+  // Cualquier rol con sesión puede ver sus propios datos.
   // El tenant sale del JWT (verificado por el guard), nunca del request.
+  @Authenticated()
   @Get('me')
   me(@CurrentUser() user: AccessTokenPayload): Promise<AuthUser> {
     return this.auth.me(user);
