@@ -5,6 +5,7 @@ import { Suspense } from 'react';
 import { Logo } from '@/components/logo';
 import { LogoutButton } from '@/components/logout-button';
 import { NavLinks } from '@/components/nav-links';
+import { QueryProvider } from '@/components/query-provider';
 import { getCurrentUser } from '@/lib/session';
 
 const ROLE_STYLES: Record<Role, { label: string; className: string }> = {
@@ -45,7 +46,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
           <LogoutButton />
         </header>
-        <main className="flex-1 px-4 py-8 sm:px-8 lg:px-10">{children}</main>
+        <main className="flex-1 px-4 py-8 sm:px-8 lg:px-10">
+          {/* Caché de datos del navegador (TanStack Query) para las páginas del dashboard. */}
+          <QueryProvider>{children}</QueryProvider>
+        </main>
       </div>
     </div>
   );
