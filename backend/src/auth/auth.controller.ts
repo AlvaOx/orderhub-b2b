@@ -68,9 +68,10 @@ export class AuthController {
     res.clearCookie(REFRESH_TOKEN_COOKIE, this.cookieOptions(REFRESH_COOKIE_PATH));
   }
 
+  // El tenant sale del JWT (verificado por el guard), nunca del request.
   @Get('me')
   me(@CurrentUser() user: AccessTokenPayload): Promise<AuthUser> {
-    return this.auth.me(user.sub);
+    return this.auth.me(user);
   }
 
   private cookieOptions(path: string): CookieOptions {
