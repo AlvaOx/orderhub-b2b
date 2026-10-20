@@ -38,10 +38,11 @@ export class OrdersService {
       ],
     };
 
-    const rows = await this.prisma.forTenant(user.tenantId, (tx) =>
-      tx.order.findMany({
+    return this.prisma.forTenant(user.tenantId, async (tx) => {
+      // 1) Solo los pedidos de la página. Sin JOIN de conteo, Postgres recorre el
+      //    índice (tenant_id, number) hacia atrás y se detiene al llegar a limit + 1.
+      const rows = await tx.order.findMany({
         where,
-        // Más nuevo primero. Usa el índice único (tenant_id, number).
         orderBy: { number: 'desc' },
         // Uno extra para saber si hay otra página, sin hacer COUNT(*).
         take: query.limit + 1,
@@ -53,27 +54,38 @@ export class OrdersService {
           createdAt: true,
           // Sin N+1: Prisma trae todos los vendedores en una sola consulta (WHERE id IN ...).
           seller: { select: { id: true, name: true } },
-          // Cantidad de ítems como subconsulta, sin traer los ítems.
-          _count: { select: { items: true } },
         },
-      }),
-    );
+      });
 
-    const hasMore = rows.length > query.limit;
-    const page = hasMore ? rows.slice(0, query.limit) : rows;
-    const last = page.at(-1);
+      const hasMore = rows.length > query.limit;
+      const page = hasMore ? rows.slice(0, query.limit) : rows;
+      const last = page.at(-1);
 
-    return {
-      items: page.map((order) => ({
-        id: order.id,
-        number: order.number,
-        status: order.status,
-        total: order.total,
-        itemsCount: order._count.items,
-        createdAt: order.createdAt.toISOString(),
-        seller: order.seller,
-      })),
-      nextCursor: hasMore && last ? last.number : null,
-    };
+      // 2) Cantidad de ítems SOLO de los pedidos de esta página (usa el índice
+      //    order_items(order_id)). El costo depende del tamaño de la página, no de la tabla.
+      //    Antes, el _count de Prisma agrupaba los ítems de TODA la empresa en cada request.
+      const counts =
+        page.length === 0
+          ? []
+          : await tx.orderItem.groupBy({
+              by: ['orderId'],
+              where: { tenantId: user.tenantId, orderId: { in: page.map((order) => order.id) } },
+              _count: { _all: true },
+            });
+      const itemsByOrder = new Map(counts.map((c) => [c.orderId, c._count._all]));
+
+      return {
+        items: page.map((order) => ({
+          id: order.id,
+          number: order.number,
+          status: order.status,
+          total: order.total,
+          itemsCount: itemsByOrder.get(order.id) ?? 0,
+          createdAt: order.createdAt.toISOString(),
+          seller: order.seller,
+        })),
+        nextCursor: hasMore && last ? last.number : null,
+      };
+    });
   }
 }
