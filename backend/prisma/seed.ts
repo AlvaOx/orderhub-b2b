@@ -1,8 +1,3 @@
-// =============================================
-// OrderHub B2B — Seed de datos de prueba
-// Crea 3 empresas, usuarios demo por rol, productos y 20.000 pedidos.
-// Ejecutar: pnpm --filter @orderhub/backend exec prisma db seed
-// =============================================
 import { fakerES as faker } from '@faker-js/faker';
 import { hash } from '@node-rs/argon2';
 import type { OrderStatus } from '@orderhub/shared';
@@ -14,8 +9,10 @@ import { PrismaClient } from '../src/generated/prisma/client.js';
 
 config({ path: '../.env' });
 
+// El seed usa el superusuario a propósito: limpia la base y carga datos de
+// todas las empresas, así que necesita saltarse RLS. La app nunca usa esta URL.
 const prisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_ADMIN_URL }),
 });
 
 // Semilla fija: cada ejecución genera los mismos nombres, montos y fechas.
