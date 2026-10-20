@@ -83,9 +83,10 @@ export function OrdersTable({ userId, role }: Props) {
   const searchParams = useSearchParams();
 
   // La URL es la fuente de verdad de los filtros: se puede compartir y "atrás" funciona.
+  const urlNumber = searchParams.get('numero') ?? '';
   const filters: Filters = {
     status: parseStatus(searchParams.get('estado')),
-    number: parseNumber(searchParams.get('numero')),
+    number: parseNumber(urlNumber),
   };
   const filterKey = JSON.stringify(filters);
 
@@ -98,21 +99,39 @@ export function OrdersTable({ userId, role }: Props) {
     router[mode](query ? `${pathname}?${query}` : pathname, { scroll: false });
   }
 
-  // Búsqueda con debounce: la URL (y la consulta) cambia 300 ms después de la última tecla.
-  const [numberInput, setNumberInput] = useState(searchParams.get('numero') ?? '');
+  // ---------- Buscador por número (debounce + sincronía con la URL) ----------
+  const [numberInput, setNumberInput] = useState(urlNumber);
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Último valor que el PROPIO buscador escribió en la URL. Distingue nuestros cambios
+  // de los que vienen de afuera (crear pedido, botón atrás, un link compartido).
+  const lastOwnWrite = useRef<string | null>(null);
+
   useEffect(() => () => clearTimeout(debounceTimer.current), []);
+
+  // Next 16 conserva el estado de la página al navegar (<Activity>), así que el buscador
+  // no se vuelve a montar: si la URL cambió desde afuera, hay que reflejarla aquí.
+  // Si la cambió el propio buscador, se respeta lo que el usuario siga escribiendo.
+  useEffect(() => {
+    if (urlNumber !== lastOwnWrite.current) {
+      setNumberInput(urlNumber);
+    }
+    lastOwnWrite.current = null;
+  }, [urlNumber]);
 
   function handleNumberChange(value: string) {
     const digits = value.replace(/\D/g, '');
     setNumberInput(digits);
     clearTimeout(debounceTimer.current);
-    debounceTimer.current = setTimeout(
-      () => setFilter('numero', digits, 'replace'),
-      SEARCH_DEBOUNCE_MS,
-    );
+    // La URL (y la consulta) cambia 300 ms después de la última tecla, no con cada una.
+    debounceTimer.current = setTimeout(() => {
+      const current = new URLSearchParams(window.location.search).get('numero') ?? '';
+      if (digits === current) return;
+      lastOwnWrite.current = digits;
+      setFilter('numero', digits, 'replace');
+    }, SEARCH_DEBOUNCE_MS);
   }
 
+  // ---------- Datos ----------
   const query = useInfiniteQuery({
     // El usuario va en la llave: si otra persona entra en esta pestaña, no ve el caché anterior.
     queryKey: ['orders', userId, filters],
