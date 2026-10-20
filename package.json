@@ -6,6 +6,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "dev": "docker compose up -d --wait && pnpm --filter @orderhub/shared build && pnpm -r --parallel run dev",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
