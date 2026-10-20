@@ -1,9 +1,15 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   type CreatedOrder,
   type CreateOrderInput,
   type ListOrdersQuery,
   MAX_ORDER_TOTAL,
+  type OrderDetail,
   type OrdersPage,
   WAREHOUSE_VISIBLE_STATUSES,
 } from '@orderhub/shared';
@@ -13,6 +19,7 @@ import { PrismaService } from '../database/prisma.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
 
 // Qué pedidos ve cada rol DENTRO de su empresa (RLS ya limita a la empresa).
+// La usan el listado y el detalle: lo que no ves en la tabla, tampoco lo abres por URL.
 // Switch exhaustivo: un rol nuevo sin su regla no compila.
 function scopeForRole({ role, sub }: AccessTokenPayload): Prisma.OrderWhereInput {
   switch (role) {
@@ -90,6 +97,53 @@ export class OrdersService {
         nextCursor: hasMore && last ? last.number : null,
       };
     });
+  }
+
+  async findByNumber(user: AccessTokenPayload, number: number): Promise<OrderDetail> {
+    const order = await this.prisma.forTenant(user.tenantId, (tx) =>
+      tx.order.findUnique({
+        // Índice único (tenant_id, number) + la misma regla por rol que el listado.
+        where: { tenantId_number: { tenantId: user.tenantId, number }, AND: [scopeForRole(user)] },
+        select: {
+          id: true,
+          number: true,
+          status: true,
+          total: true,
+          createdAt: true,
+          updatedAt: true,
+          seller: { select: { id: true, name: true } },
+          // Sin N+1: ítems y sus productos llegan en una consulta por nivel (WHERE ... IN).
+          items: {
+            orderBy: { id: 'asc' },
+            select: {
+              id: true,
+              quantity: true,
+              unitPrice: true,
+              product: { select: { id: true, sku: true, name: true } },
+            },
+          },
+        },
+      }),
+    );
+
+    // 404 y no 403: si no te corresponde verlo, no confirmamos que exista.
+    if (!order) {
+      throw new NotFoundException('Pedido no encontrado');
+    }
+
+    return {
+      id: order.id,
+      number: order.number,
+      status: order.status,
+      total: order.total,
+      createdAt: order.createdAt.toISOString(),
+      updatedAt: order.updatedAt.toISOString(),
+      seller: order.seller,
+      items: order.items.map((item) => ({
+        ...item,
+        subtotal: item.quantity * item.unitPrice,
+      })),
+    };
   }
 
   /**

@@ -78,3 +78,31 @@ export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 
 // Lo que responde el backend al crear un pedido.
 export type CreatedOrder = { id: string; number: number };
+
+// ---------- Detalle ----------
+
+// El número del pedido en la URL (/api/orders/10001). Llega como texto.
+export const orderNumberParamSchema = z.coerce
+  .number('Número de pedido inválido')
+  .int('Número de pedido inválido')
+  .positive('Número de pedido inválido');
+
+export type OrderDetailItem = {
+  id: string;
+  quantity: number;
+  // Precio guardado al crear el pedido (no el precio actual del producto).
+  unitPrice: number;
+  subtotal: number;
+  product: { id: string; sku: string; name: string };
+};
+
+export type OrderDetail = {
+  id: string;
+  number: number;
+  status: OrderStatus;
+  total: number;
+  createdAt: string;
+  updatedAt: string;
+  seller: { id: string; name: string };
+  items: OrderDetailItem[];
+};

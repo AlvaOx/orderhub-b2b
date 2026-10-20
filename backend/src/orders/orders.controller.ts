@@ -1,10 +1,12 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import {
   type CreatedOrder,
   type CreateOrderInput,
   createOrderSchema,
   type ListOrdersQuery,
   listOrdersQuerySchema,
+  type OrderDetail,
+  orderNumberParamSchema,
   type OrdersPage,
 } from '@orderhub/shared';
 
@@ -26,6 +28,16 @@ export class OrdersController {
     @CurrentUser() user: AccessTokenPayload,
   ): Promise<OrdersPage> {
     return this.orders.list(user, query);
+  }
+
+  // GET /api/orders/10001  ->  detalle con ítems. 404 si no existe o no te corresponde verlo.
+  @RequirePermissions('orders:read')
+  @Get(':number')
+  findByNumber(
+    @Param('number', new ZodValidationPipe(orderNumberParamSchema)) number: number,
+    @CurrentUser() user: AccessTokenPayload,
+  ): Promise<OrderDetail> {
+    return this.orders.findByNumber(user, number);
   }
 
   // POST /api/orders  { items: [{ productId, quantity }] }  ->  201 { id, number }
