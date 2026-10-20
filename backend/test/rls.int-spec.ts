@@ -40,11 +40,11 @@ async function inRollback(fn: (tx: Tx) => Promise<void>): Promise<void> {
   }
 }
 
-// Crea una empresa con un vendedor y `orders` pedidos (como admin, sin RLS).
+// Crea una empresa con un vendedor y `orders` pedidos numerados (como admin, sin RLS).
 async function createTenant(tx: Tx, label: string, orders: number): Promise<TestTenant> {
   const unique = randomUUID();
   const tenant = await tx.tenant.create({
-    data: { name: `Empresa ${label}`, slug: `rls-${label}-${unique}` },
+    data: { name: `Empresa ${label}`, slug: `rls-${label}-${unique}`, orderSeq: orders },
   });
   const seller = await tx.user.create({
     data: {
@@ -56,8 +56,9 @@ async function createTenant(tx: Tx, label: string, orders: number): Promise<Test
     },
   });
   const created = await tx.order.createManyAndReturn({
-    data: Array.from({ length: orders }, () => ({
+    data: Array.from({ length: orders }, (_, i) => ({
       tenantId: tenant.id,
+      number: i + 1,
       sellerId: seller.id,
       total: 10_000,
     })),

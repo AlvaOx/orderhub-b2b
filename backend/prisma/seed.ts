@@ -1,3 +1,8 @@
+// =============================================
+// OrderHub B2B — Seed de datos de prueba
+// Crea 3 empresas, usuarios demo por rol, productos y 20.000 pedidos.
+// Ejecutar: pnpm --filter @orderhub/backend exec prisma db seed
+// =============================================
 import { fakerES as faker } from '@faker-js/faker';
 import { hash } from '@node-rs/argon2';
 import type { OrderStatus } from '@orderhub/shared';
@@ -41,6 +46,7 @@ const STATUS_WEIGHTS: { weight: number; value: OrderStatus }[] = [
 type OrderRow = {
   id: string;
   tenantId: string;
+  number: number;
   sellerId: string;
   status: OrderStatus;
   total: number;
@@ -56,14 +62,21 @@ type OrderItemRow = {
   unitPrice: number;
 };
 
-async function insertBatch(orders: OrderRow[], items: OrderItemRow[]): Promise<void> {
-  // Primero los pedidos y después sus ítems, porque los ítems apuntan al pedido.
-  await prisma.order.createMany({ data: orders });
-  await prisma.orderItem.createMany({ data: items });
+// Inserta en bloques para no armar una sola consulta gigante.
+async function insertInBatches<T>(
+  rows: T[],
+  insert: (batch: T[]) => Promise<unknown>,
+): Promise<void> {
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    await insert(rows.slice(i, i + BATCH_SIZE));
+  }
 }
 
 async function seedTenant(t: (typeof TENANTS)[number], passwordHash: string): Promise<void> {
-  const tenant = await prisma.tenant.create({ data: { name: t.name, slug: t.slug } });
+  // El talonario parte en el total: los pedidos se numeran 1..t.orders más abajo.
+  const tenant = await prisma.tenant.create({
+    data: { name: t.name, slug: t.slug, orderSeq: t.orders },
+  });
   const domain = `${t.slug}.test`;
 
   // Usuarios: uno por rol, más 2 vendedores extra para repartir los pedidos.
@@ -91,9 +104,9 @@ async function seedTenant(t: (typeof TENANTS)[number], passwordHash: string): Pr
     select: { id: true, price: true },
   });
 
-  // Pedidos e ítems, insertados en bloques
-  let orders: OrderRow[] = [];
-  let items: OrderItemRow[] = [];
+  // Pedidos e ítems: primero se generan todos en memoria.
+  const orders: OrderRow[] = [];
+  const items: OrderItemRow[] = [];
 
   for (let i = 0; i < t.orders; i++) {
     const createdAt = faker.date.past({ years: 1 });
@@ -116,20 +129,24 @@ async function seedTenant(t: (typeof TENANTS)[number], passwordHash: string): Pr
     orders.push({
       id: orderId,
       tenantId: tenant.id,
+      number: 0, // se asigna después de ordenar por fecha
       sellerId: faker.helpers.arrayElement(sellers).id,
       status: faker.helpers.weightedArrayElement(STATUS_WEIGHTS),
       total,
       createdAt,
       updatedAt: createdAt,
     });
-
-    if (orders.length === BATCH_SIZE) {
-      await insertBatch(orders, items);
-      orders = [];
-      items = [];
-    }
   }
-  if (orders.length > 0) await insertBatch(orders, items);
+
+  // Correlativo por fecha de creación (igual que la migración): #1 es el más antiguo.
+  orders.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
+  orders.forEach((order, index) => {
+    order.number = index + 1;
+  });
+
+  // Primero todos los pedidos y después sus ítems, porque los ítems apuntan al pedido.
+  await insertInBatches(orders, (batch) => prisma.order.createMany({ data: batch }));
+  await insertInBatches(items, (batch) => prisma.orderItem.createMany({ data: batch }));
 
   console.log(
     `[seed] ${t.name}: ${users.length} usuarios, ${products.length} productos, ${t.orders} pedidos`,

@@ -55,6 +55,8 @@ model Tenant {
   id        String   @id @default(uuid(7)) @db.Uuid
   name      String
   slug      String   @unique
+  // Último número de pedido usado por la empresa (correlativo propio, sin huecos).
+  orderSeq  Int      @default(0) @map("order_seq")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   users      User[]
@@ -105,6 +107,8 @@ model Product {
 model Order {
   id        String      @id @default(uuid(7)) @db.Uuid
   tenantId  String      @map("tenant_id") @db.Uuid
+  // Número legible y correlativo por empresa (#1, #2, ...). Sale de tenants.order_seq.
+  number    Int
   sellerId  String      @map("seller_id") @db.Uuid
   status    OrderStatus @default(pendiente_pago)
   total     Int
@@ -116,6 +120,8 @@ model Order {
   items    OrderItem[]
   payments Payment[]
 
+  // Cada empresa tiene su propio correlativo; también sirve para buscar por número.
+  @@unique([tenantId, number])
   // Paginación por cursor: "los pedidos de esta empresa, del más nuevo al más antiguo".
   @@index([tenantId, createdAt(sort: Desc), id])
   // Filtro por estado dentro de una empresa.
@@ -173,7 +179,6 @@ model WebhookEvent {
   @@unique([provider, eventId])
   @@map("webhook_events")
 }
-
 
 // ---------- Refresh tokens (sesiones) ----------
 model RefreshToken {
