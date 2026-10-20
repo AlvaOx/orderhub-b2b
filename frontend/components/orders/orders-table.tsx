@@ -11,24 +11,18 @@ import {
 } from '@orderhub/shared';
 import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
 import { createColumnHelper, tableFeatures, useTable } from '@tanstack/react-table';
+import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
 import { ORDER_STATUS_LABELS, OrderStatusBadge } from '@/components/orders/order-status-badge';
 import { apiFetch } from '@/lib/api-client';
+import { formatClp, formatDateTime } from '@/lib/format';
 
 const SEARCH_DEBOUNCE_MS = 300;
 // Arreglo vacío estable: un [] nuevo en cada render haría recalcular la tabla sin motivo.
 const EMPTY: OrderListItem[] = [];
 const NUMERIC_COLUMNS = new Set(['itemsCount', 'total']);
-
-// Montos en pesos chilenos y fechas en hora de Chile, sin importar la zona del navegador.
-const clp = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' });
-const dateTime = new Intl.DateTimeFormat('es-CL', {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-  timeZone: 'America/Santiago',
-});
 
 // TanStack Table v9: solo el núcleo. Ordenar, filtrar y paginar lo hace el backend (cursor).
 const features = tableFeatures({});
@@ -37,17 +31,24 @@ const columnHelper = createColumnHelper<typeof features, OrderListItem>();
 const columns = columnHelper.columns([
   columnHelper.accessor('number', {
     header: 'N°',
-    cell: (info) => <span className="font-medium text-slate-900">#{info.getValue()}</span>,
+    cell: (info) => (
+      <Link
+        href={`/pedidos/${info.getValue()}`}
+        className="font-medium text-indigo-600 hover:text-indigo-500 hover:underline"
+      >
+        #{info.getValue()}
+      </Link>
+    ),
   }),
   columnHelper.accessor('createdAt', {
     header: 'Fecha',
-    cell: (info) => dateTime.format(new Date(info.getValue())),
+    cell: (info) => formatDateTime(info.getValue()),
   }),
   columnHelper.accessor((order) => order.seller.name, { id: 'seller', header: 'Vendedor' }),
   columnHelper.accessor('itemsCount', { header: 'Ítems' }),
   columnHelper.accessor('total', {
     header: 'Total',
-    cell: (info) => clp.format(info.getValue()),
+    cell: (info) => formatClp(info.getValue()),
   }),
   columnHelper.accessor('status', {
     header: 'Estado',
