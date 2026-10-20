@@ -32,7 +32,8 @@ async function Detail({ params }: { params: Promise<{ numero: string }> }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');
 
-  return <OrderDetailView userId={user.id} number={parsed.data} />;
+  // El rol decide qué acciones se muestran (avanzar estado, cancelar).
+  return <OrderDetailView userId={user.id} role={user.role} number={parsed.data} />;
 }
 
 function DetailFallback() {
