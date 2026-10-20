@@ -13,6 +13,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   constructor(config: ConfigService<Env, true>) {
     super({
       adapter: new PrismaPg({ connectionString: config.get('DATABASE_URL', { infer: true }) }),
+      // Con DB_LOG_QUERIES=true se ve cada SQL en la consola (solo para desarrollo).
+      log: config.get('DB_LOG_QUERIES', { infer: true }) ? ['query', 'warn', 'error'] : ['error'],
     });
   }
 

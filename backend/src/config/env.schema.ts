@@ -17,6 +17,9 @@ export const envSchema = z.object({
   API_PORT: z.coerce.number().int().positive().default(3001),
   FRONTEND_URL: z.url(),
   DATABASE_URL: z.url(),
+  // Imprime cada SQL de Prisma en la consola (para revisar N+1 y medir). Apagado por defecto.
+  // stringbool entiende "true"/"false"; coerce.boolean convertiría "false" en true.
+  DB_LOG_QUERIES: z.stringbool().default(false),
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_ACCESS_TTL: durationSchema,
   JWT_REFRESH_TTL: durationSchema,
