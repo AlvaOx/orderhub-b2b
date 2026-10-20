@@ -22,7 +22,8 @@ import { formatClp, formatDateTime } from '@/lib/format';
 const SEARCH_DEBOUNCE_MS = 300;
 // Arreglo vacío estable: un [] nuevo en cada render haría recalcular la tabla sin motivo.
 const EMPTY: OrderListItem[] = [];
-const NUMERIC_COLUMNS = new Set(['itemsCount', 'total']);
+// Columnas alineadas a la derecha: números y la acción.
+const RIGHT_ALIGNED = new Set(['itemsCount', 'total', 'actions']);
 
 // TanStack Table v9: solo el núcleo. Ordenar, filtrar y paginar lo hace el backend (cursor).
 const features = tableFeatures({});
@@ -31,14 +32,7 @@ const columnHelper = createColumnHelper<typeof features, OrderListItem>();
 const columns = columnHelper.columns([
   columnHelper.accessor('number', {
     header: 'N°',
-    cell: (info) => (
-      <Link
-        href={`/pedidos/${info.getValue()}`}
-        className="font-medium text-indigo-600 hover:text-indigo-500 hover:underline"
-      >
-        #{info.getValue()}
-      </Link>
-    ),
+    cell: (info) => <span className="font-medium text-slate-900">#{info.getValue()}</span>,
   }),
   columnHelper.accessor('createdAt', {
     header: 'Fecha',
@@ -53,6 +47,30 @@ const columns = columnHelper.columns([
   columnHelper.accessor('status', {
     header: 'Estado',
     cell: (info) => <OrderStatusBadge status={info.getValue()} />,
+  }),
+  // Acción explícita: un botón "Ver" es más claro que adivinar que el número era un link.
+  columnHelper.display({
+    id: 'actions',
+    header: () => <span className="sr-only">Acciones</span>,
+    cell: (info) => (
+      <Link
+        href={`/pedidos/${info.row.original.number}`}
+        aria-label={`Ver el pedido #${info.row.original.number}`}
+        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700"
+      >
+        Ver
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          className="h-3.5 w-3.5"
+          aria-hidden="true"
+        >
+          <path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </Link>
+    ),
   }),
 ]);
 
@@ -228,7 +246,7 @@ export function OrdersTable({ userId, role }: Props) {
                       key={header.id}
                       scope="col"
                       className={`px-4 py-3 text-xs font-semibold tracking-wide whitespace-nowrap text-slate-500 uppercase ${
-                        NUMERIC_COLUMNS.has(header.column.id) ? 'text-right' : 'text-left'
+                        RIGHT_ALIGNED.has(header.column.id) ? 'text-right' : 'text-left'
                       }`}
                     >
                       <table.FlexRender header={header} />
@@ -270,7 +288,7 @@ export function OrdersTable({ userId, role }: Props) {
                       <td
                         key={cell.id}
                         className={`px-4 py-3 whitespace-nowrap text-slate-600 ${
-                          NUMERIC_COLUMNS.has(cell.column.id) ? 'text-right tabular-nums' : ''
+                          RIGHT_ALIGNED.has(cell.column.id) ? 'text-right tabular-nums' : ''
                         }`}
                       >
                         <table.FlexRender cell={cell} />

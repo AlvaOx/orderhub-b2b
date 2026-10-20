@@ -12,15 +12,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { ORDER_STATUS_LABELS, OrderStatusBadge } from '@/components/orders/order-status-badge';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { ApiError, apiFetch } from '@/lib/api-client';
 import { formatClp, formatDateTime } from '@/lib/format';
 
 type Props = { userId: string; role: Role; number: number };
 
+// Qué diálogo de confirmación está abierto (o ninguno).
+type PendingAction = 'advance' | 'cancel' | null;
+
 export function OrderDetailView({ userId, role, number }: Props) {
   const queryClient = useQueryClient();
   const queryKey = ['order', userId, number];
   const [actionError, setActionError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<PendingAction>(null);
 
   const query = useQuery({
     // El usuario va en la llave, igual que en el listado.
@@ -32,6 +37,7 @@ export function OrderDetailView({ userId, role, number }: Props) {
   // en el caché (sin otra petición) y se marcan como viejos el listado y el stock.
   function handleUpdated(detail: OrderDetail) {
     setActionError(null);
+    setConfirming(null);
     queryClient.setQueryData(queryKey, detail);
     void queryClient.invalidateQueries({ queryKey: ['orders'] });
     void queryClient.invalidateQueries({ queryKey: ['products'] });
@@ -39,6 +45,7 @@ export function OrderDetailView({ userId, role, number }: Props) {
 
   // Si el pedido cambió mientras tanto (409), se vuelve a pedir para mostrar su estado real.
   function handleActionError(error: Error) {
+    setConfirming(null);
     setActionError(error instanceof ApiError ? error.message : 'No pudimos actualizar el pedido.');
     void query.refetch();
   }
@@ -98,14 +105,6 @@ export function OrderDetailView({ userId, role, number }: Props) {
   const canCancel = CANCELLABLE_STATUSES.includes(order.status) && can(role, 'orders:cancel');
   const busy = advance.isPending || cancel.isPending;
 
-  function handleCancel() {
-    if (
-      window.confirm(`¿Cancelar el pedido #${order.number}? El stock de sus productos se devuelve.`)
-    ) {
-      cancel.mutate();
-    }
-  }
-
   return (
     <div className="mt-6 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -121,23 +120,21 @@ export function OrderDetailView({ userId, role, number }: Props) {
             {canCancel && (
               <button
                 type="button"
-                onClick={handleCancel}
+                onClick={() => setConfirming('cancel')}
                 disabled={busy}
-                className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {cancel.isPending ? 'Cancelando...' : 'Cancelar pedido'}
+                Cancelar pedido
               </button>
             )}
             {canAdvance && nextStatus && (
               <button
                 type="button"
-                onClick={() => advance.mutate(nextStatus)}
+                onClick={() => setConfirming('advance')}
                 disabled={busy}
                 className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {advance.isPending
-                  ? 'Guardando...'
-                  : `Marcar como ${ORDER_STATUS_LABELS[nextStatus]}`}
+                Marcar como {ORDER_STATUS_LABELS[nextStatus]}
               </button>
             )}
           </div>
@@ -147,9 +144,17 @@ export function OrderDetailView({ userId, role, number }: Props) {
       {actionError && (
         <div
           role="alert"
-          className="rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700"
+          className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
         >
-          {actionError}
+          <span className="flex-1">{actionError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            aria-label="Cerrar aviso"
+            className="rounded-md px-1.5 text-red-500 hover:bg-red-100 hover:text-red-700"
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -215,6 +220,31 @@ export function OrderDetailView({ userId, role, number }: Props) {
       </div>
 
       <Timeline order={order} />
+
+      {/* Confirmación para avanzar: despachar o entregar por error también es grave. */}
+      {nextStatus && (
+        <ConfirmDialog
+          open={confirming === 'advance'}
+          title={`¿Marcar el pedido #${order.number} como ${ORDER_STATUS_LABELS[nextStatus]}?`}
+          description={`Pasará de "${ORDER_STATUS_LABELS[order.status]}" a "${ORDER_STATUS_LABELS[nextStatus]}" y quedará registrado en el historial con tu nombre.`}
+          confirmLabel={`Sí, marcar como ${ORDER_STATUS_LABELS[nextStatus]}`}
+          pending={advance.isPending}
+          onConfirm={() => advance.mutate(nextStatus)}
+          onClose={() => setConfirming(null)}
+        />
+      )}
+
+      {/* Confirmación para cancelar: acción destructiva, en rojo. */}
+      <ConfirmDialog
+        open={confirming === 'cancel'}
+        tone="danger"
+        title={`¿Cancelar el pedido #${order.number}?`}
+        description="El stock de sus productos se devuelve al inventario. Esta acción no se puede deshacer."
+        confirmLabel="Sí, cancelar pedido"
+        pending={cancel.isPending}
+        onConfirm={() => cancel.mutate()}
+        onClose={() => setConfirming(null)}
+      />
     </div>
   );
 }
