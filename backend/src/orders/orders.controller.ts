@@ -1,5 +1,12 @@
-import { Controller, Get, Query } from '@nestjs/common';
-import { type ListOrdersQuery, listOrdersQuerySchema, type OrdersPage } from '@orderhub/shared';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import {
+  type CreatedOrder,
+  type CreateOrderInput,
+  createOrderSchema,
+  type ListOrdersQuery,
+  listOrdersQuerySchema,
+  type OrdersPage,
+} from '@orderhub/shared';
 
 import type { AccessTokenPayload } from '../auth/auth.types.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
@@ -19,5 +26,15 @@ export class OrdersController {
     @CurrentUser() user: AccessTokenPayload,
   ): Promise<OrdersPage> {
     return this.orders.list(user, query);
+  }
+
+  // POST /api/orders  { items: [{ productId, quantity }] }  ->  201 { id, number }
+  @RequirePermissions('orders:create')
+  @Post()
+  create(
+    @Body(new ZodValidationPipe(createOrderSchema)) body: CreateOrderInput,
+    @CurrentUser() user: AccessTokenPayload,
+  ): Promise<CreatedOrder> {
+    return this.orders.create(user, body);
   }
 }

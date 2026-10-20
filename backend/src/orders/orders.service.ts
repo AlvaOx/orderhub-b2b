@@ -1,6 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import {
+  type CreatedOrder,
+  type CreateOrderInput,
   type ListOrdersQuery,
+  MAX_ORDER_TOTAL,
   type OrdersPage,
   WAREHOUSE_VISIBLE_STATUSES,
 } from '@orderhub/shared';
@@ -86,6 +89,80 @@ export class OrdersService {
         })),
         nextCursor: hasMore && last ? last.number : null,
       };
+    });
+  }
+
+  /**
+   * Crea un pedido en UNA transacción: si algo falla (producto inexistente, sin stock,
+   * total excesivo), se revierte todo, incluido el stock ya descontado.
+   */
+  async create(user: AccessTokenPayload, input: CreateOrderInput): Promise<CreatedOrder> {
+    // Siempre en el mismo orden (por id): dos pedidos con los mismos productos no pueden
+    // bloquearse en cruz (deadlock), porque ambos toman las filas en el mismo orden.
+    const lines = [...input.items].sort((a, b) => a.productId.localeCompare(b.productId));
+
+    return this.prisma.forTenant(user.tenantId, async (tx) => {
+      // 1) Precios desde la base, NUNCA desde el navegador.
+      const products = await tx.product.findMany({
+        where: { tenantId: user.tenantId, id: { in: lines.map((line) => line.productId) } },
+        select: { id: true, sku: true, price: true },
+      });
+      const productsById = new Map(products.map((product) => [product.id, product]));
+
+      const priced = lines.map((line) => {
+        const product = productsById.get(line.productId);
+        if (!product) {
+          throw new BadRequestException('Uno o más productos no existen');
+        }
+        // unitPrice es una foto del precio de hoy: si mañana cambia, el pedido no cambia.
+        return { ...line, sku: product.sku, unitPrice: product.price };
+      });
+
+      const total = priced.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
+      // total se guarda en un INTEGER de Postgres: mejor un mensaje claro que un error de la base.
+      if (total > MAX_ORDER_TOTAL) {
+        throw new BadRequestException('El total del pedido excede el máximo permitido');
+      }
+
+      // 2) Stock: verificar y descontar en UNA sentencia (UPDATE ... WHERE stock >= cantidad).
+      //    Si otra transacción tenía la fila bloqueada, Postgres espera y vuelve a evaluar
+      //    el WHERE con el stock nuevo. Leer, comparar en Node y restar sería una carrera.
+      for (const line of priced) {
+        const { count } = await tx.product.updateMany({
+          where: { id: line.productId, tenantId: user.tenantId, stock: { gte: line.quantity } },
+          data: { stock: { decrement: line.quantity } },
+        });
+        if (count === 0) {
+          throw new ConflictException(`Stock insuficiente para ${line.sku}`);
+        }
+      }
+
+      // 3) Talonario AL FINAL: su fila queda bloqueada hasta el COMMIT y serializa los
+      //    pedidos de toda la empresa. Mientras más tarde se tome, menos esperan los demás.
+      const { orderSeq: number } = await tx.tenant.update({
+        where: { id: user.tenantId },
+        data: { orderSeq: { increment: 1 } },
+        select: { orderSeq: true },
+      });
+
+      // 4) Pedido e ítems. El vendedor es quien lo crea (sale del JWT, no del body).
+      return tx.order.create({
+        data: {
+          tenantId: user.tenantId,
+          number,
+          sellerId: user.sub,
+          total,
+          items: {
+            create: priced.map((line) => ({
+              tenantId: user.tenantId,
+              productId: line.productId,
+              quantity: line.quantity,
+              unitPrice: line.unitPrice,
+            })),
+          },
+        },
+        select: { id: true, number: true },
+      });
     });
   }
 }
