@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { validateEnv } from './config/env.schema.js';
 import { DatabaseModule } from './database/database.module.js';
 import { HealthController } from './health/health.controller.js';
+import { OrdersModule } from './orders/orders.module.js';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { HealthController } from './health/health.controller.js';
     }),
     DatabaseModule,
     AuthModule,
+    OrdersModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
