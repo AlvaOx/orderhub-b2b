@@ -96,6 +96,15 @@ export type OrderDetailItem = {
   product: { id: string; sku: string; name: string };
 };
 
+// Un cambio de estado en la línea de tiempo del pedido (quién, de cuál a cuál y cuándo).
+export type OrderStatusChange = {
+  id: string;
+  fromStatus: OrderStatus;
+  toStatus: OrderStatus;
+  changedAt: string;
+  changedBy: { id: string; name: string };
+};
+
 export type OrderDetail = {
   id: string;
   number: number;
@@ -105,4 +114,6 @@ export type OrderDetail = {
   updatedAt: string;
   seller: { id: string; name: string };
   items: OrderDetailItem[];
+  // Del más antiguo al más reciente. La creación del pedido sale de createdAt y seller.
+  history: OrderStatusChange[];
 };

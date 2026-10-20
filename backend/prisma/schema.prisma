@@ -59,11 +59,12 @@ model Tenant {
   orderSeq  Int      @default(0) @map("order_seq")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  users      User[]
-  products   Product[]
-  orders     Order[]
-  orderItems OrderItem[]
-  payments   Payment[]
+  users         User[]
+  products      Product[]
+  orders        Order[]
+  orderItems    OrderItem[]
+  payments      Payment[]
+  statusChanges OrderStatusChange[]
 
   @@map("tenants")
 }
@@ -78,9 +79,10 @@ model User {
   role         Role
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   orders        Order[]
   refreshTokens RefreshToken[]
+  statusChanges OrderStatusChange[]
 
   @@index([tenantId])
   @@map("users")
@@ -115,10 +117,11 @@ model Order {
   createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  seller   User        @relation(fields: [sellerId], references: [id], onDelete: Restrict)
-  items    OrderItem[]
-  payments Payment[]
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  seller        User                @relation(fields: [sellerId], references: [id], onDelete: Restrict)
+  items         OrderItem[]
+  payments      Payment[]
+  statusHistory OrderStatusChange[]
 
   // Cada empresa tiene su propio correlativo; también sirve para buscar por número.
   @@unique([tenantId, number])
@@ -145,6 +148,26 @@ model OrderItem {
   @@index([orderId])
   @@index([productId])
   @@map("order_items")
+}
+
+// ---------- Historial de estados del pedido ----------
+// Quién cambió el estado, de cuál a cuál y cuándo. Inmutable: la app solo inserta y lee.
+model OrderStatusChange {
+  id          String      @id @default(uuid(7)) @db.Uuid
+  tenantId    String      @map("tenant_id") @db.Uuid
+  orderId     String      @map("order_id") @db.Uuid
+  fromStatus  OrderStatus @map("from_status")
+  toStatus    OrderStatus @map("to_status")
+  changedById String      @map("changed_by_id") @db.Uuid
+  changedAt   DateTime    @default(now()) @map("changed_at") @db.Timestamptz(3)
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  order     Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  changedBy User   @relation(fields: [changedById], references: [id], onDelete: Restrict)
+
+  // Línea de tiempo de un pedido, ya ordenada.
+  @@index([orderId, changedAt])
+  @@map("order_status_history")
 }
 
 // ---------- Pagos ----------

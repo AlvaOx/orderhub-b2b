@@ -5,12 +5,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  CANCELLABLE_STATUSES,
   type CreatedOrder,
   type CreateOrderInput,
   type ListOrdersQuery,
   MAX_ORDER_TOTAL,
+  NEXT_FULFILLMENT_STATUS,
   type OrderDetail,
   type OrdersPage,
+  type OrderStatus,
   WAREHOUSE_VISIBLE_STATUSES,
 } from '@orderhub/shared';
 
@@ -19,7 +22,7 @@ import { PrismaService } from '../database/prisma.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
 
 // Qué pedidos ve cada rol DENTRO de su empresa (RLS ya limita a la empresa).
-// La usan el listado y el detalle: lo que no ves en la tabla, tampoco lo abres por URL.
+// La usan el listado, el detalle y los cambios de estado: lo que no ves, no lo abres ni lo cambias.
 // Switch exhaustivo: un rol nuevo sin su regla no compila.
 function scopeForRole({ role, sub }: AccessTokenPayload): Prisma.OrderWhereInput {
   switch (role) {
@@ -31,6 +34,9 @@ function scopeForRole({ role, sub }: AccessTokenPayload): Prisma.OrderWhereInput
       return { status: { in: [...WAREHOUSE_VISIBLE_STATUSES] } };
   }
 }
+
+const STALE_ORDER_MESSAGE =
+  'El pedido ya no está en un estado que permita este cambio. Recarga para ver su estado actual.';
 
 @Injectable()
 export class OrdersService {
@@ -122,6 +128,17 @@ export class OrdersService {
               product: { select: { id: true, sku: true, name: true } },
             },
           },
+          // Línea de tiempo: usa el índice (order_id, changed_at).
+          statusHistory: {
+            orderBy: { changedAt: 'asc' },
+            select: {
+              id: true,
+              fromStatus: true,
+              toStatus: true,
+              changedAt: true,
+              changedBy: { select: { id: true, name: true } },
+            },
+          },
         },
       }),
     );
@@ -142,6 +159,10 @@ export class OrdersService {
       items: order.items.map((item) => ({
         ...item,
         subtotal: item.quantity * item.unitPrice,
+      })),
+      history: order.statusHistory.map((change) => ({
+        ...change,
+        changedAt: change.changedAt.toISOString(),
       })),
     };
   }
@@ -218,5 +239,109 @@ export class OrdersService {
         select: { id: true, number: true },
       });
     });
+  }
+
+  /**
+   * Avanza el pedido al estado SIGUIENTE del flujo de bodega (pagado -> preparando ->
+   * despachado -> entregado). `to` es lo que el usuario vio en pantalla: si el pedido
+   * cambió mientras tanto, la transición no calza y responde 409.
+   */
+  async advanceStatus(
+    user: AccessTokenPayload,
+    number: number,
+    to: OrderStatus,
+  ): Promise<OrderDetail> {
+    await this.prisma.forTenant(user.tenantId, async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { tenantId_number: { tenantId: user.tenantId, number }, AND: [scopeForRole(user)] },
+        select: { id: true, status: true },
+      });
+      if (!order) {
+        throw new NotFoundException('Pedido no encontrado');
+      }
+
+      // Solo se avanza al siguiente: no se salta ni se retrocede.
+      if (NEXT_FULFILLMENT_STATUS[order.status] !== to) {
+        throw new ConflictException(STALE_ORDER_MESSAGE);
+      }
+
+      // Bloqueo optimista: cambia solo si sigue en el estado que leímos.
+      // Si otra persona se adelantó, actualiza 0 filas y respondemos 409.
+      const { count } = await tx.order.updateMany({
+        where: { id: order.id, status: order.status },
+        data: { status: to },
+      });
+      if (count === 0) {
+        throw new ConflictException(STALE_ORDER_MESSAGE);
+      }
+
+      // En la misma transacción: si falla el historial, tampoco cambia el estado.
+      await tx.orderStatusChange.create({
+        data: {
+          tenantId: user.tenantId,
+          orderId: order.id,
+          fromStatus: order.status,
+          toStatus: to,
+          changedById: user.sub,
+        },
+      });
+    });
+
+    return this.findByNumber(user, number);
+  }
+
+  /**
+   * Cancela un pedido pendiente de pago y devuelve su stock, todo en una transacción.
+   * Un pedido pagado no se cancela aquí: eso exige reembolso (Fase 2).
+   */
+  async cancel(user: AccessTokenPayload, number: number): Promise<OrderDetail> {
+    await this.prisma.forTenant(user.tenantId, async (tx) => {
+      const order = await tx.order.findUnique({
+        // El vendedor solo encuentra SUS pedidos: no puede cancelar los de otro.
+        where: { tenantId_number: { tenantId: user.tenantId, number }, AND: [scopeForRole(user)] },
+        select: {
+          id: true,
+          status: true,
+          items: { select: { productId: true, quantity: true } },
+        },
+      });
+      if (!order) {
+        throw new NotFoundException('Pedido no encontrado');
+      }
+
+      if (!CANCELLABLE_STATUSES.includes(order.status)) {
+        throw new ConflictException('Solo se pueden cancelar pedidos pendientes de pago');
+      }
+
+      // Bloqueo optimista, igual que al avanzar.
+      const { count } = await tx.order.updateMany({
+        where: { id: order.id, status: order.status },
+        data: { status: 'cancelado' },
+      });
+      if (count === 0) {
+        throw new ConflictException(STALE_ORDER_MESSAGE);
+      }
+
+      // Devuelve el stock. Mismo orden por id que al crear: sin deadlocks.
+      const items = [...order.items].sort((a, b) => a.productId.localeCompare(b.productId));
+      for (const item of items) {
+        await tx.product.updateMany({
+          where: { id: item.productId, tenantId: user.tenantId },
+          data: { stock: { increment: item.quantity } },
+        });
+      }
+
+      await tx.orderStatusChange.create({
+        data: {
+          tenantId: user.tenantId,
+          orderId: order.id,
+          fromStatus: order.status,
+          toStatus: 'cancelado',
+          changedById: user.sub,
+        },
+      });
+    });
+
+    return this.findByNumber(user, number);
   }
 }
