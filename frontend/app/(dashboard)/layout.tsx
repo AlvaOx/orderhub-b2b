@@ -24,7 +24,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </span>
         </div>
 
-        <NavLinks />
+        {/* El menú depende del rol (lee la cookie de sesión), así que va dentro de Suspense. */}
+        <Suspense fallback={<NavLinksSkeleton />}>
+          <SidebarNav />
+        </Suspense>
 
         <div className="border-t border-slate-200 p-4">
           {/* Depende de la cookie de sesión, así que va dentro de Suspense. */}
@@ -46,6 +49,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </div>
     </div>
   );
+}
+
+// Menú filtrado por los permisos del rol. getCurrentUser usa cache(): no repite la llamada.
+async function SidebarNav() {
+  const user = await getCurrentUser();
+  if (!user) redirect('/login');
+
+  return <NavLinks role={user.role} />;
 }
 
 async function UserCard() {
@@ -78,6 +89,20 @@ async function UserCard() {
         </span>
         <LogoutButton />
       </div>
+    </div>
+  );
+}
+
+// Mismo tamaño que el menú real, para que el sidebar no "salte" al cargar.
+function NavLinksSkeleton() {
+  return (
+    <div className="flex-1 animate-pulse space-y-1 p-4" aria-hidden="true">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="flex items-center gap-3 px-3 py-2">
+          <div className="h-5 w-5 rounded bg-slate-200" />
+          <div className="h-3 w-24 rounded bg-slate-100" />
+        </div>
+      ))}
     </div>
   );
 }

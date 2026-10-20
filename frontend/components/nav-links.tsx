@@ -1,5 +1,6 @@
 'use client';
 
+import { can, type Permission, type Role } from '@orderhub/shared';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
@@ -12,10 +13,19 @@ const iconProps = {
   'aria-hidden': true,
 } as const;
 
-const LINKS = [
+type NavLink = {
+  href: string;
+  label: string;
+  // Permiso necesario para ver el link (la misma matriz que usa el guard del backend).
+  permission: Permission;
+  icon: React.ReactNode;
+};
+
+const LINKS: NavLink[] = [
   {
     href: '/pedidos',
     label: 'Pedidos',
+    permission: 'orders:read',
     icon: (
       <svg {...iconProps}>
         <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
@@ -27,6 +37,7 @@ const LINKS = [
   {
     href: '/productos',
     label: 'Productos',
+    permission: 'products:read',
     icon: (
       <svg {...iconProps}>
         <path d="M21 8 12 3 3 8v8l9 5 9-5V8Z" strokeLinejoin="round" />
@@ -37,6 +48,7 @@ const LINKS = [
   {
     href: '/usuarios',
     label: 'Usuarios',
+    permission: 'users:manage',
     icon: (
       <svg {...iconProps}>
         <circle cx="9" cy="8" r="3.5" />
@@ -47,12 +59,14 @@ const LINKS = [
   },
 ];
 
-export function NavLinks() {
+// Esconder links es comodidad, no seguridad: el guard del backend responde 403 igual.
+export function NavLinks({ role }: { role: Role }) {
   const pathname = usePathname();
+  const links = LINKS.filter((link) => can(role, link.permission));
 
   return (
     <nav className="flex-1 space-y-1 p-4">
-      {LINKS.map((link) => {
+      {links.map((link) => {
         const active = pathname.startsWith(link.href);
         return (
           <Link
