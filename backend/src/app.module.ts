@@ -8,6 +8,7 @@ import { validateEnv } from './config/env.schema.js';
 import { DatabaseModule } from './database/database.module.js';
 import { HealthController } from './health/health.controller.js';
 import { OrdersModule } from './orders/orders.module.js';
+import { PaymentsModule } from './payments/payments.module.js';
 import { ProductsModule } from './products/products.module.js';
 
 @Module({
@@ -20,6 +21,7 @@ import { ProductsModule } from './products/products.module.js';
     DatabaseModule,
     AuthModule,
     OrdersModule,
+    PaymentsModule,
     ProductsModule,
   ],
   controllers: [AppController, HealthController],
