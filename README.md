@@ -2,7 +2,7 @@
 
 Portal de pedidos **multi-tenant** para empresas B2B: cada empresa ve solo sus datos y, dentro de ella, cada rol ve y hace solo lo que le corresponde.
 
-Proyecto de portafolio construido con **Next.js 16, NestJS, PostgreSQL 18 y Prisma 7**, enfocado en lo que importa en producción: aislamiento de datos con Row Level Security, permisos por rol, concurrencia correcta y rendimiento medido.
+Proyecto de portafolio construido con **Next.js 16, NestJS, PostgreSQL 18 y Prisma 7**, enfocado en lo que importa en producción: aislamiento de datos con Row Level Security, permisos por rol, concurrencia correcta, rendimiento medido e integraciones de pago confiables.
 
 ---
 
@@ -12,6 +12,7 @@ Proyecto de portafolio construido con **Next.js 16, NestJS, PostgreSQL 18 y Pris
 - **Permisos por rol (RBAC)** con una sola matriz compartida entre backend y frontend, y rutas que **fallan cerradas** si no declaran permisos.
 - **Concurrencia correcta:** el stock nunca queda negativo, el número de pedido no se repite ni salta, y no hay deadlocks. Probado con 20 pedidos simultáneos contra Postgres real.
 - **Rendimiento medido:** paginación por cursor y un listado que pasó de **35,8 ms a 0,36 ms** después de medir con `EXPLAIN ANALYZE` ([ver el análisis](docs/rendimiento-listado-pedidos.md)).
+- **Pagos con webhooks firmados e idempotentes:** pasarela desacoplada con el patrón adapter, firma HMAC con protección contra repetición y procesamiento exactamente una vez, aunque el mismo evento llegue dos veces.
 - **Sesiones seguras:** JWT en cookies `httpOnly`, refresh tokens rotativos con detección de reuso y renovación automática en el navegador.
 
 ---
@@ -65,7 +66,8 @@ orderhub-b2b/
 | **Base de datos**     | RLS (`ENABLE` + `FORCE`) en todas las tablas con `tenant_id`. Cada transacción define la empresa con `set_config('app.tenant_id', $1, true)`. Sin empresa definida, la base devuelve **cero filas** (falla cerrada). |
 | **Roles de Postgres** | La app se conecta con `orderhub_app`: sin superusuario, sin `BYPASSRLS` y solo con `SELECT/INSERT/UPDATE/DELETE` por tabla. Las migraciones usan otro rol. El backend ni siquiera conoce la URL de admin.            |
 | **Login**             | Antes de conocer la empresa, el login usa funciones `SECURITY DEFINER` acotadas, que solo buscan por correo o id exacto y no permiten listar usuarios.                                                               |
-| **Historial**         | `order_status_history` es **inmutable**: la app solo tiene `SELECT` e `INSERT`.                                                                                                                                      |
+| **Webhooks**          | Llegan sin sesión. Una función `SECURITY DEFINER` responde solo de qué empresa y pedido es un pago; el resto del proceso corre con RLS activo, como cualquier request.                                               |
+| **Historial**         | `order_status_history` es **inmutable**: la app solo tiene `SELECT` e `INSERT`. Los cambios hechos por el sistema (un pago aprobado) quedan sin usuario, no con un usuario ficticio.                                 |
 
 Un test de integración falla si alguna tabla con `tenant_id` queda sin RLS activado y forzado.
 
@@ -77,6 +79,7 @@ Un test de integración falla si alguna tabla con `tenant_id` queda sin RLS acti
 | ---------------------------------------------- | :---: | :------------: | :------------------------: |
 | Ver pedidos                                    | Todos | Solo los suyos | Desde "pagado" en adelante |
 | Crear pedidos                                  |  Sí   |       Sí       |                            |
+| Pagar pedidos pendientes                       |  Sí   | Solo los suyos |                            |
 | Avanzar estado (preparar, despachar, entregar) |  Sí   |                |             Sí             |
 | Cancelar pedidos pendientes                    |  Sí   | Solo los suyos |                            |
 | Ver productos                                  |  Sí   |       Sí       |                            |
@@ -95,6 +98,36 @@ Un test de integración falla si alguna tabla con `tenant_id` queda sin RLS acti
 - **Precios desde la base**, nunca desde el navegador. El precio queda guardado en el pedido como foto del momento.
 - **Bloqueo optimista** al cambiar estado: `UPDATE ... WHERE status = <el que viste>`. Si alguien se adelantó, responde `409`.
 - **Historial de estados** con quién, de qué estado a cuál y cuándo, mostrado como línea de tiempo en el detalle.
+
+---
+
+## Pagos y webhooks
+
+El pago usa una **pasarela simulada** dentro de la app (es un prototipo: no hay cobros reales ni cuentas externas), pero el flujo es el mismo que con una pasarela real: la tienda **solo se entera del resultado por un webhook firmado**, nunca por el navegador.
+
+```mermaid
+sequenceDiagram
+    participant U as Usuario
+    participant T as Tienda (NestJS)
+    participant P as Pasarela simulada
+    participant DB as PostgreSQL
+    U->>T: POST /api/orders/:numero/payment
+    T->>DB: bloquea el pedido y crea el pago pendiente
+    T-->>U: URL del checkout
+    U->>P: Aprobar o Rechazar
+    P->>T: POST /api/webhooks/fake-pay (firma HMAC)
+    T->>T: verifica firma y antigüedad
+    T->>DB: función segura: ¿de qué empresa es este pago?
+    T->>DB: una transacción: evento único + pago + pedido + historial
+    T-->>P: 200
+```
+
+- **Patrón adapter:** el resto de la app solo conoce la interfaz `PaymentProvider`. Usar Mercado Pago significa escribir otra implementación y cambiar una línea en el módulo.
+- **Firma HMAC-SHA256** sobre los bytes exactos del cuerpo (raw body) y un timestamp. Un webhook de más de 5 minutos se rechaza (protección contra repetición). La comparación se hace con `timingSafeEqual`.
+- **Idempotencia:** `UNIQUE (provider, event_id)` con `ON CONFLICT DO NOTHING`, **en la misma transacción** que el cambio. Si el evento ya existía, no se reprocesa. Si el proceso falla, el rollback deshace también el registro del evento y el reintento de la pasarela lo procesa de nuevo.
+- **Sin confiar en el mensaje:** el monto del evento se compara con el monto guardado y el pedido avanza con bloqueo optimista (`pendiente_pago → pagado`).
+- **Orden de bloqueo fijo** (primero el pedido, después el pago) al iniciar un pago y al procesar el webhook: no hay deadlocks entre ambos.
+- **Un solo checkout vivo por pedido:** al abrir uno nuevo, el anterior queda anulado.
 
 ---
 
@@ -156,6 +189,8 @@ Clave para todas: `Demo1234!`. El login trae botones de un clic para Ferretería
 | Distribuidora Biobío |   6.000 | `admin@biobio.test`, `vendedor@biobio.test`, `bodega@biobio.test`       |
 | Comercial Pacífico   |   4.000 | `admin@pacifico.test`, `vendedor@pacifico.test`, `bodega@pacifico.test` |
 
+Para probar un pago: entra como vendedor, crea un pedido, aprieta **Pagar** y elige **Aprobar pago** en el checkout simulado. El pedido queda pagado y el historial muestra el cambio hecho por la pasarela.
+
 ---
 
 ## Tests
@@ -177,9 +212,8 @@ Los tests de integración cubren:
 
 ## Próximos pasos (fase 2)
 
-- Pago con **Mercado Pago** (sandbox) y **webhook idempotente** con verificación de firma.
-- Cancelación de pedidos pagados con **reembolso**.
-- **Tiempo real con Socket.IO:** la pantalla se actualiza sola cuando bodega cambia un estado.
+- Cancelación de pedidos pagados con **reembolso** a través del mismo adaptador de pagos.
+- **Tiempo real con Socket.IO:** la pantalla se actualiza sola cuando bodega cambia un estado o se aprueba un pago.
 - **Cola de notificaciones con BullMQ** y reintentos.
 - Clave de idempotencia al crear pedidos, CI con GitHub Actions y deploy.
 
