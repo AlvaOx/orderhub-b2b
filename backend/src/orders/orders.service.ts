@@ -14,26 +14,12 @@ import {
   type OrderDetail,
   type OrdersPage,
   type OrderStatus,
-  WAREHOUSE_VISIBLE_STATUSES,
 } from '@orderhub/shared';
 
 import type { AccessTokenPayload } from '../auth/auth.types.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
-
-// Qué pedidos ve cada rol DENTRO de su empresa (RLS ya limita a la empresa).
-// La usan el listado, el detalle y los cambios de estado: lo que no ves, no lo abres ni lo cambias.
-// Switch exhaustivo: un rol nuevo sin su regla no compila.
-function scopeForRole({ role, sub }: AccessTokenPayload): Prisma.OrderWhereInput {
-  switch (role) {
-    case 'admin':
-      return {};
-    case 'vendedor':
-      return { sellerId: sub };
-    case 'bodega':
-      return { status: { in: [...WAREHOUSE_VISIBLE_STATUSES] } };
-  }
-}
+import { scopeForRole } from './order-scope.js';
 
 const STALE_ORDER_MESSAGE =
   'El pedido ya no está en un estado que permita este cambio. Recarga para ver su estado actual.';
