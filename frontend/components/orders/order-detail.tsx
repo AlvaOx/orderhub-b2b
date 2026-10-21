@@ -3,12 +3,14 @@
 import {
   CANCELLABLE_STATUSES,
   can,
+  type CheckoutSession,
   NEXT_FULFILLMENT_STATUS,
   type OrderDetail,
   type OrderStatus,
   type Role,
 } from '@orderhub/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import { ORDER_STATUS_LABELS, OrderStatusBadge } from '@/components/orders/order-status-badge';
@@ -26,6 +28,7 @@ type PendingAction = 'advance' | 'cancel' | null;
 const SYSTEM_ACTOR_LABEL = 'Pasarela de pago';
 
 export function OrderDetailView({ userId, role, number }: Props) {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const queryKey = ['order', userId, number];
   const [actionError, setActionError] = useState<string | null>(null);
@@ -71,6 +74,15 @@ export function OrderDetailView({ userId, role, number }: Props) {
     onError: handleActionError,
   });
 
+  // Pagar: el backend abre un checkout en la pasarela y responde adónde ir.
+  // El pedido NO cambia aquí: cambia cuando llega el webhook de la pasarela.
+  const pay = useMutation({
+    mutationFn: () =>
+      apiFetch<CheckoutSession>(`/api/orders/${number}/payment`, { method: 'POST' }),
+    onSuccess: ({ checkoutUrl }) => router.push(checkoutUrl),
+    onError: handleActionError,
+  });
+
   if (query.isPending) {
     return <DetailSkeleton />;
   }
@@ -107,7 +119,8 @@ export function OrderDetailView({ userId, role, number }: Props) {
   const nextStatus = NEXT_FULFILLMENT_STATUS[order.status];
   const canAdvance = Boolean(nextStatus) && can(role, 'orders:update_status');
   const canCancel = CANCELLABLE_STATUSES.includes(order.status) && can(role, 'orders:cancel');
-  const busy = advance.isPending || cancel.isPending;
+  const canPay = order.status === 'pendiente_pago' && can(role, 'payments:create');
+  const busy = advance.isPending || cancel.isPending || pay.isPending;
 
   return (
     <div className="mt-6 space-y-6">
@@ -119,7 +132,7 @@ export function OrderDetailView({ userId, role, number }: Props) {
           <OrderStatusBadge status={order.status} />
         </div>
 
-        {(canAdvance || canCancel) && (
+        {(canAdvance || canCancel || canPay) && (
           <div className="flex gap-2">
             {canCancel && (
               <button
@@ -129,6 +142,16 @@ export function OrderDetailView({ userId, role, number }: Props) {
                 className="rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Cancelar pedido
+              </button>
+            )}
+            {canPay && (
+              <button
+                type="button"
+                onClick={() => pay.mutate()}
+                disabled={busy}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {pay.isPending ? 'Abriendo pago…' : `Pagar ${formatClp(order.total)}`}
               </button>
             )}
             {canAdvance && nextStatus && (
