@@ -6,6 +6,7 @@ export const PERMISSIONS = [
   'orders:create',
   'orders:update_status',
   'orders:cancel',
+  'payments:create',
   'products:read',
   'products:manage',
   'users:manage',
@@ -19,8 +20,8 @@ export type Permission = (typeof PERMISSIONS)[number];
 export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   // El admin es dueño de su empresa: recibe todos los permisos, incluidos los futuros.
   admin: PERMISSIONS,
-  // El vendedor cancela solo SUS pedidos: la regla por rol del servicio le oculta los ajenos.
-  vendedor: ['orders:read', 'orders:create', 'orders:cancel', 'products:read'],
+  // El vendedor cancela y paga solo SUS pedidos: la regla por rol del servicio le oculta los ajenos.
+  vendedor: ['orders:read', 'orders:create', 'orders:cancel', 'payments:create', 'products:read'],
   bodega: ['orders:read', 'orders:update_status'],
 };
 

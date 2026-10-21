@@ -16,6 +16,9 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   API_PORT: z.coerce.number().int().positive().default(3001),
   FRONTEND_URL: z.url(),
+  // URL base con la que el backend se llama a sí mismo (sin /api). La pasarela simulada
+  // envía sus webhooks aquí, igual que una pasarela real llamaría a nuestro servidor.
+  API_INTERNAL_URL: z.url(),
   DATABASE_URL: z.url(),
   // Imprime cada SQL de Prisma en la consola (para revisar N+1 y medir). Apagado por defecto.
   // stringbool entiende "true"/"false"; coerce.boolean convertiría "false" en true.
@@ -23,6 +26,8 @@ export const envSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_ACCESS_TTL: durationSchema,
   JWT_REFRESH_TTL: durationSchema,
+  // Secreto compartido con la pasarela simulada para firmar sus webhooks (HMAC-SHA256).
+  FAKE_PAY_WEBHOOK_SECRET: z.string().min(32),
 });
 
 export type Env = z.infer<typeof envSchema>;

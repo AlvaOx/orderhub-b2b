@@ -6,7 +6,9 @@ import { AppModule } from './app.module.js';
 import type { Env } from './config/env.schema.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: además del JSON parseado, guarda los bytes originales en request.rawBody.
+  // La firma HMAC de los webhooks se verifica sobre esos bytes exactos.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const config = app.get<ConfigService<Env, true>>(ConfigService);
 
   // Todas las rutas quedan bajo /api (ej: /api/auth/login).
