@@ -34,8 +34,11 @@ enum OrderStatus {
   @@map("order_status")
 }
 
+// Proveedores de pago. "simulado" es la pasarela falsa del prototipo; "mercadopago"
+// queda como ejemplo de otra implementación del mismo adaptador.
 enum PaymentProvider {
   mercadopago
+  simulado
 
   @@map("payment_provider")
 }
@@ -152,18 +155,20 @@ model OrderItem {
 
 // ---------- Historial de estados del pedido ----------
 // Quién cambió el estado, de cuál a cuál y cuándo. Inmutable: la app solo inserta y lee.
+// changedById es NULL cuando el cambio lo hizo el sistema (ej: el webhook de la pasarela
+// al aprobar un pago), no una persona.
 model OrderStatusChange {
   id          String      @id @default(uuid(7)) @db.Uuid
   tenantId    String      @map("tenant_id") @db.Uuid
   orderId     String      @map("order_id") @db.Uuid
   fromStatus  OrderStatus @map("from_status")
   toStatus    OrderStatus @map("to_status")
-  changedById String      @map("changed_by_id") @db.Uuid
+  changedById String?     @map("changed_by_id") @db.Uuid
   changedAt   DateTime    @default(now()) @map("changed_at") @db.Timestamptz(3)
 
   tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   order     Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  changedBy User   @relation(fields: [changedById], references: [id], onDelete: Restrict)
+  changedBy User?  @relation(fields: [changedById], references: [id], onDelete: Restrict)
 
   // Línea de tiempo de un pedido, ya ordenada.
   @@index([orderId, changedAt])
@@ -171,6 +176,8 @@ model OrderStatusChange {
 }
 
 // ---------- Pagos ----------
+// Un intento de pago de un pedido. externalId es el id que entrega la pasarela:
+// con él, el webhook encuentra el pago (y su empresa) sin JWT.
 model Payment {
   id         String          @id @default(uuid(7)) @db.Uuid
   tenantId   String          @map("tenant_id") @db.Uuid

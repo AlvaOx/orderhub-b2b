@@ -102,7 +102,8 @@ export type OrderStatusChange = {
   fromStatus: OrderStatus;
   toStatus: OrderStatus;
   changedAt: string;
-  changedBy: { id: string; name: string };
+  // null = lo hizo el sistema (ej: el webhook de la pasarela al aprobar el pago), no una persona.
+  changedBy: { id: string; name: string } | null;
 };
 
 export type OrderDetail = {

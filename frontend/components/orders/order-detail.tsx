@@ -21,6 +21,10 @@ type Props = { userId: string; role: Role; number: number };
 // Qué diálogo de confirmación está abierto (o ninguno).
 type PendingAction = 'advance' | 'cancel' | null;
 
+// Quién figura en el historial cuando el cambio no lo hizo una persona (changedBy = null).
+// Hoy el único actor de sistema es el webhook de pagos.
+const SYSTEM_ACTOR_LABEL = 'Pasarela de pago';
+
 export function OrderDetailView({ userId, role, number }: Props) {
   const queryClient = useQueryClient();
   const queryKey = ['order', userId, number];
@@ -256,7 +260,8 @@ function Timeline({ order }: { order: OrderDetail }) {
     ...order.history.map((change) => ({
       id: change.id,
       title: `${ORDER_STATUS_LABELS[change.fromStatus]} → ${ORDER_STATUS_LABELS[change.toStatus]}`,
-      who: change.changedBy.name,
+      // Sin persona detrás: el cambio lo hizo el sistema.
+      who: change.changedBy?.name ?? SYSTEM_ACTOR_LABEL,
       at: change.changedAt,
     })),
   ];
